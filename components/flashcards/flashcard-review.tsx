@@ -3,7 +3,19 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
-import { CheckIcon, FlipIcon, UndoIcon } from '@/components/ui/icons';
+import { Confetti } from '@/components/ui/confetti';
+import {
+  CheckIcon,
+  FlipIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+  ShuffleIcon,
+  SwapIcon,
+  UndoIcon,
+  VolumeIcon,
+} from '@/components/ui/icons';
+import { recordActivity } from '@/lib/study-stats';
+import { cn } from '@/lib/utils';
 import type { Flashcard } from '@/lib/ai/schemas';
 
 /**
@@ -14,13 +26,27 @@ import type { Flashcard } from '@/lib/ai/schemas';
  *
  * Interaction: click or press Space to flip; drag the card (or use the arrow
  * keys) to sort it. Right = got it, left = review again.
+ *
+ * Extras: shuffle what's left, show answers first, read the card aloud, and a
+ * distraction-free focus mode (Esc to leave). Finished rounds are counted in
+ * the local study stats (lib/study-stats.ts).
  */
 
 const EXIT_MS = 340; // keep in step with fc-exit-* in globals.css
 const SWIPE_THRESHOLD = 110; // px of horizontal drag that commits a sort
 const TAP_SLOP = 6; // px of movement that still counts as a tap
+const REVIEW_PREVIEW = 5; // how many "still to review" cards the summary lists
 
 type ExitDirection = 'left' | 'right';
+
+function shuffled<T>(list: T[]): T[] {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 export function FlashcardReview({ items }: { items: Flashcard[] }) {
   const [queue, setQueue] = useState<number[]>(() => items.map((_, i) => i));
@@ -28,6 +54,14 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
   const [flipped, setFlipped] = useState(false);
   const [repeat, setRepeat] = useState<number[]>([]);
   const [round, setRound] = useState(1);
+  const [run, setRun] = useState(0); // bumps every time a round is (re)started
+
+  // Study options.
+  const [reversed, setReversed] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [shuffles, setShuffles] = useState(0);
+  const [canSpeak, setCanSpeak] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   // Presentation state for the card itself.
   const [lift, setLift] = useState<'none' | 'a' | 'b'>('none');
@@ -38,6 +72,9 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
   const pointer = useRef<{ id: number; startX: number; moved: boolean } | null>(null);
   const lastDragX = useRef(0);
   const exitTimer = useRef<number | null>(null);
+  const tilt = useRef<HTMLDivElement>(null);
+  const utterance = useRef<SpeechSynthesisUtterance | null>(null);
+  const recordedRun = useRef(-1);
 
   const total = queue.length;
   const done = position >= total;
@@ -47,21 +84,97 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
   const known = position - repeat.length;
   const tall = useMemo(() => items.some((item) => Math.max(item.front.length, item.back.length) > 180), [items]);
 
+  // What each face shows. "Answer first" simply swaps them.
+  const frontText = card ? (reversed ? card.back : card.front) : '';
+  const backText = card ? (reversed ? card.front : card.back) : '';
+  const frontLabel = reversed ? 'Answer' : 'Prompt';
+  const backLabel = reversed ? 'Prompt' : 'Answer';
+
   useEffect(() => {
+    setCanSpeak('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined');
     return () => {
       if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
 
+  // Count each finished round once toward the study streak.
+  useEffect(() => {
+    if (!done || total === 0 || recordedRun.current === run) return;
+    recordedRun.current = run;
+    recordActivity({ cards: total, known: total - repeat.length });
+  }, [done, run, total, repeat.length]);
+
+  // Focus mode: lock page scroll, and let Esc leave.
+  useEffect(() => {
+    if (!focus) return;
+    const previous = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setFocus(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.documentElement.style.overflow = previous;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [focus]);
+
+  function stopSpeaking() {
+    if (!('speechSynthesis' in window)) return;
+    utterance.current = null; // so the cancelled utterance's onerror is ignored
+    window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }
+
+  function toggleSpeak() {
+    if (speaking) {
+      stopSpeaking();
+      return;
+    }
+    const spoken = new SpeechSynthesisUtterance(flipped ? backText : frontText);
+    const finish = () => {
+      if (utterance.current === spoken) {
+        utterance.current = null;
+        setSpeaking(false);
+      }
+    };
+    spoken.onend = finish;
+    spoken.onerror = finish;
+    window.speechSynthesis.cancel();
+    utterance.current = spoken;
+    window.speechSynthesis.speak(spoken);
+    setSpeaking(true);
+  }
+
   function flip() {
     if (exit) return;
+    stopSpeaking();
     setFlipped((f) => !f);
     // Alternating between two identical keyframes restarts the lift every flip.
     setLift((l) => (l === 'a' ? 'b' : 'a'));
   }
 
+  function shuffle() {
+    if (exit || done || total - position < 2) return;
+    stopSpeaking();
+    // Shuffle the current card and everything after it; cards already sorted stay put.
+    setQueue([...queue.slice(0, position), ...shuffled(queue.slice(position))]);
+    setFlipped(false);
+    setLift('none');
+    setShuffles((n) => n + 1); // new key → the "rise from the deck" entrance replays
+  }
+
+  function toggleReversed() {
+    stopSpeaking();
+    setReversed((r) => !r);
+    setFlipped(false);
+    setLift('none');
+  }
+
   function advance(keep: boolean) {
     if (keep) setRepeat((prev) => [...prev, queue[position]]);
+    stopSpeaking();
     setFlipped(false);
     setLift('none');
     setDragX(0);
@@ -92,6 +205,7 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
     setFlipped(false);
     setLift('none');
     setRound((r) => r + 1);
+    setRun((r) => r + 1);
   }
 
   function restart() {
@@ -101,6 +215,7 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
     setFlipped(false);
     setLift('none');
     setRound(1);
+    setRun((r) => r + 1);
   }
 
   // The keyboard handler is registered once and reads the latest actions
@@ -135,6 +250,30 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [done]);
 
+  /** Mouse hover: the card leans toward the pointer and catches a little light. */
+  function tiltTo(event: ReactPointerEvent<HTMLDivElement>) {
+    const el = tilt.current;
+    if (!el) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width;
+    const py = (event.clientY - rect.top) / rect.height;
+    el.dataset.active = 'true';
+    el.style.setProperty('--ry', `${((px - 0.5) * 10).toFixed(2)}deg`);
+    el.style.setProperty('--rx', `${(-(py - 0.5) * 8).toFixed(2)}deg`);
+    el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+    el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+    el.style.setProperty('--glare', '1');
+  }
+
+  function tiltReset() {
+    const el = tilt.current;
+    if (!el) return;
+    el.dataset.active = 'false';
+    el.style.setProperty('--rx', '0deg');
+    el.style.setProperty('--ry', '0deg');
+    el.style.setProperty('--glare', '0');
+  }
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (exit || (event.pointerType === 'mouse' && event.button !== 0)) return;
     pointer.current = { id: event.pointerId, startX: event.clientX, moved: false };
@@ -143,11 +282,16 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const current = pointer.current;
-    if (!current || current.id !== event.pointerId) return;
+    if (!current) {
+      if (event.pointerType === 'mouse' && !exit) tiltTo(event);
+      return;
+    }
+    if (current.id !== event.pointerId) return;
     const delta = event.clientX - current.startX;
     if (!current.moved) {
       if (Math.abs(delta) < TAP_SLOP) return;
       current.moved = true;
+      tiltReset(); // a drag is its own motion; don't stack a lean on top
       setDragging(true);
     }
     lastDragX.current = delta;
@@ -182,32 +326,73 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
     lastDragX.current = 0;
     setDragging(false);
     setDragX(0);
+    tiltReset();
+  }
+
+  /**
+   * Normal layout and focus mode share one structure (a wrapper that only turns
+   * `fixed` in focus mode), so toggling focus never remounts the card.
+   */
+  function shell(children: React.ReactNode) {
+    return (
+      <div className={cn(focus && 'fixed inset-0 z-50 overflow-y-auto bg-background')}>
+        {focus ? <div className="bg-dots pointer-events-none absolute inset-0" aria-hidden="true" /> : null}
+        <div className={cn(focus && 'relative mx-auto flex min-h-full max-w-2xl flex-col justify-center px-5 py-10')}>
+          {children}
+        </div>
+      </div>
+    );
   }
 
   if (done) {
     const remaining = repeat.length;
-    return (
-      <Card className="mx-auto w-full max-w-xl animate-reveal">
-        <CardBody className="space-y-6 py-10 text-center">
-          <div className="mx-auto grid size-12 place-items-center rounded-full bg-success/10 text-success">
-            <CheckIcon className="size-6" />
-          </div>
-          <div>
-            <h3 className="text-xl font-semibold tracking-tight">Round {round} finished</h3>
-            <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
-              {remaining === 0
-                ? `You got through all ${total} ${total === 1 ? 'card' : 'cards'} without marking any for review.`
-                : `${total - remaining} of ${total} marked as known. ${remaining} left to review.`}
-            </p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            {remaining > 0 ? <Button onClick={nextRound}>Review the {remaining} remaining</Button> : null}
-            <Button variant="secondary" onClick={restart}>
-              Start over
-            </Button>
-          </div>
-        </CardBody>
-      </Card>
+    return shell(
+      <>
+        {remaining === 0 ? <Confetti /> : null}
+        <Card className="mx-auto w-full max-w-xl animate-reveal">
+          <CardBody className="space-y-6 py-10 text-center">
+            <div className="mx-auto grid size-12 place-items-center rounded-full bg-success/10 text-success">
+              <CheckIcon className="size-6" />
+            </div>
+            <div>
+              <h3 className="text-xl font-semibold tracking-tight">Round {round} finished</h3>
+              <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                {remaining === 0
+                  ? `You got through all ${total} ${total === 1 ? 'card' : 'cards'} without marking any for review.`
+                  : `${total - remaining} of ${total} marked as known. ${remaining} left to review.`}
+              </p>
+            </div>
+
+            {remaining > 0 ? (
+              <div className="mx-auto max-w-md text-left">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">Still to review</p>
+                <ul className="divide-y rounded-lg border text-sm">
+                  {repeat.slice(0, REVIEW_PREVIEW).map((index) => (
+                    <li key={index} className="truncate px-3 py-2">
+                      {items[index].front}
+                    </li>
+                  ))}
+                </ul>
+                {remaining > REVIEW_PREVIEW ? (
+                  <p className="mt-2 text-xs text-muted-foreground">and {remaining - REVIEW_PREVIEW} more</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap justify-center gap-2">
+              {remaining > 0 ? <Button onClick={nextRound}>Review the {remaining} remaining</Button> : null}
+              <Button variant="secondary" onClick={restart}>
+                Start over
+              </Button>
+              {focus ? (
+                <Button variant="ghost" onClick={() => setFocus(false)}>
+                  Exit focus
+                </Button>
+              ) : null}
+            </div>
+          </CardBody>
+        </Card>
+      </>,
     );
   }
 
@@ -215,8 +400,9 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
     dragX !== 0 || dragging ? { transform: `translateX(${dragX}px) rotate(${dragX / 20}deg)` } : undefined;
   const knownStamp = exit === 'right' ? 1 : Math.min(Math.max(dragX / SWIPE_THRESHOLD, 0), 1);
   const againStamp = exit === 'left' ? 1 : Math.min(Math.max(-dragX / SWIPE_THRESHOLD, 0), 1);
+  const hiddenSide = reversed ? 'prompt' : 'answer';
 
-  return (
+  return shell(
     <div className="mx-auto w-full max-w-xl space-y-5">
       <div className="space-y-2.5">
         <div className="flex items-center justify-between text-sm text-muted-foreground">
@@ -243,6 +429,57 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
         </div>
       </div>
 
+      <div className="-mx-1 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={shuffle}
+            disabled={exit !== null || total - position < 2}
+            aria-label="Shuffle the remaining cards"
+          >
+            <ShuffleIcon />
+            <span className="hidden sm:inline">Shuffle</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleReversed}
+            aria-pressed={reversed}
+            aria-label="Show answers first"
+            className={cn(reversed && 'bg-accent')}
+          >
+            <SwapIcon />
+            <span className="hidden sm:inline">Answer first</span>
+          </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          {canSpeak ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSpeak}
+              aria-pressed={speaking}
+              aria-label={speaking ? 'Stop reading aloud' : 'Read this side aloud'}
+              className={cn(speaking && 'bg-accent')}
+            >
+              <VolumeIcon className={cn(speaking && 'animate-pulse')} />
+              <span className="hidden sm:inline">{speaking ? 'Stop' : 'Read aloud'}</span>
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setFocus((f) => !f)}
+            aria-pressed={focus}
+            aria-label={focus ? 'Exit focus mode' : 'Enter focus mode'}
+          >
+            {focus ? <MinimizeIcon /> : <MaximizeIcon />}
+            <span className="hidden sm:inline">{focus ? 'Exit focus' : 'Focus'}</span>
+          </Button>
+        </div>
+      </div>
+
       <div className="fc-stage">
         <div className="fc-deck" data-tall={tall}>
           {Array.from({ length: behind }, (_, i) => (
@@ -251,12 +488,14 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
 
           <div
             // Remounting per card replays the "rise from the stack" entrance.
-            key={`${round}-${position}`}
+            key={`${round}-${position}-${shuffles}`}
             className="fc-card"
             role="button"
             tabIndex={0}
             aria-label={
-              flipped ? 'Flashcard, showing the answer. Activate to show the prompt.' : 'Flashcard, showing the prompt. Activate to show the answer.'
+              flipped
+                ? `Flashcard, showing the ${reversed ? 'prompt' : 'answer'}. Activate to flip back.`
+                : `Flashcard, showing the ${reversed ? 'answer' : 'prompt'}. Activate to flip.`
             }
             data-dragging={dragging}
             data-exit={exit ?? undefined}
@@ -265,26 +504,30 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
+            onPointerLeave={tiltReset}
           >
-            <div className="fc-scene" data-lift={lift}>
-              <div className="fc-flip" data-flipped={flipped}>
-                <Face
-                  side="front"
-                  label="Prompt"
-                  text={card!.front}
-                  count={`${position + 1} / ${total}`}
-                  hint="Click to flip"
-                  hidden={flipped}
-                />
-                <Face
-                  side="back"
-                  label="Answer"
-                  text={card!.back}
-                  count={`${position + 1} / ${total}`}
-                  hint="Click to flip back"
-                  hidden={!flipped}
-                />
+            <div className="fc-tilt" ref={tilt}>
+              <div className="fc-scene" data-lift={lift}>
+                <div className="fc-flip" data-flipped={flipped}>
+                  <Face
+                    side="front"
+                    label={frontLabel}
+                    text={frontText}
+                    count={`${position + 1} / ${total}`}
+                    hint="Click to flip"
+                    hidden={flipped}
+                  />
+                  <Face
+                    side="back"
+                    label={backLabel}
+                    text={backText}
+                    count={`${position + 1} / ${total}`}
+                    hint="Click to flip back"
+                    hidden={!flipped}
+                  />
+                </div>
               </div>
+              <div className="fc-glare" aria-hidden="true" />
             </div>
 
             <span className="fc-stamp fc-stamp-known" style={{ opacity: knownStamp }} aria-hidden="true">
@@ -298,7 +541,7 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {flipped ? `Answer: ${card!.back}` : `Prompt: ${card!.front}`}
+        {flipped ? `${backLabel}: ${backText}` : `${frontLabel}: ${frontText}`}
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-2.5">
@@ -308,7 +551,7 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
         </Button>
         <Button variant="secondary" size="lg" onClick={flip} disabled={exit !== null}>
           <FlipIcon />
-          {flipped ? 'Hide answer' : 'Show answer'}
+          {flipped ? `Hide ${hiddenSide}` : `Show ${hiddenSide}`}
         </Button>
         <Button size="lg" onClick={() => sort(false)} disabled={exit !== null}>
           <CheckIcon />
@@ -323,7 +566,7 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
         <span className="sm:hidden">Tap to flip. </span>
         <span>drag the card left or right</span>
       </p>
-    </div>
+    </div>,
   );
 }
 

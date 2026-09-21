@@ -91,3 +91,13 @@ The UI follows the shadcn/ui approach: semantic tokens, hairline borders, a neut
 - **Theme.** `app/layout.tsx` runs a tiny inline script before first paint that follows the system setting until the person picks a theme, then remembers the choice in `localStorage`. `components/theme-toggle.tsx` is the switch.
 - **Primitives.** `components/ui/` holds `Button` (plus `buttonVariants` for link-styled buttons), `Card`, `Input`/`Textarea`/`Select`, `Alert`, `Badge`, `Segmented`, and a small inline icon set (`icons.tsx`) so there is no icon dependency.
 - **Flashcards.** `components/flashcards/flashcard-review.tsx` plus the `flashcard:start`/`flashcard:end` block in `app/globals.css`. The card is plain CSS on purpose (no `@apply`), so the 3D flip and the keyframes behave the same regardless of Tailwind's class scanning. Click or press Space to flip; drag the card, or press the left and right arrow keys, to sort it. `prefers-reduced-motion` turns every animation off and sorts instantly.
+
+## Study features
+
+- **Card extras.** Hover tilt with a light glare (mouse only), *Shuffle* (reorders what's left, never cards already sorted), *Answer first* (swaps the two faces), *Read aloud* (the browser's speech synthesis; the button only appears where it's supported), and *Focus* mode (full-screen, Esc to leave). A finished round lists the cards still to review, and a clean round gets confetti.
+- **Quiz extras.** Answer with `A`–`D` or `1`–`4`, `→` for next. The results screen lists missed questions with what you chose, the correct answer and the explanation. A score of 80% or more gets confetti.
+- **Study streak and activity.** `lib/study-stats.ts` records finished rounds and quizzes per day. The header shows the current streak; the dashboard shows the last seven days. **This is stored in the browser's `localStorage`, not in Supabase**, so it needs no schema change and works for guests, but it doesn't follow someone to another device or survive clearing site data. Moving it server-side would mean a `study_activity` table with RLS, written from the same `recordActivity` call.
+- **Export.** `lib/export.ts`. Flashcards download as tab-separated text for Anki's File > Import; quizzes as CSV. Spreadsheet cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe, because the text comes from a language model and shouldn't be able to run as a formula.
+- **Landing page.** A live, flippable demo card in the hero (`components/hero-deck.tsx`), a "Try sample notes" button, `Ctrl/⌘ + Enter` to generate, and a card-shuffle animation while generating.
+
+Tests for the streak and export logic are in `lib/study-stats.test.ts` and `lib/export.test.ts` and run with the rest via `npm test`.

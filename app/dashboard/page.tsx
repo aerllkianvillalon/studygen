@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { SetList } from '@/components/dashboard/set-list';
+import { StudyActivity } from '@/components/dashboard/study-activity';
 import { SiteFooter } from '@/components/site-footer';
 import { SiteHeader } from '@/components/site-header';
 import { buttonVariants } from '@/components/ui/button';
@@ -42,6 +43,8 @@ export default async function DashboardPage() {
             Generate a new set
           </Link>
         </div>
+
+        <StudyActivity />
 
         {error ? (
           <Alert tone="error">We couldn&apos;t load your sets just now. Refresh to try again.</Alert>

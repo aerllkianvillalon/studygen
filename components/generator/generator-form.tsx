@@ -22,6 +22,13 @@ import type { Difficulty, StudySetType } from '@/lib/ai/schemas';
 const MAX_CHARS = 8000;
 const MAX_BYTES = 5 * 1024 * 1024;
 
+// Real material, so "Try sample notes" produces a genuinely useful first set.
+const SAMPLE_NOTES = `Photosynthesis is the process by which plants, algae and some bacteria convert light energy into chemical energy stored in glucose. It takes place in chloroplasts, which contain the green pigment chlorophyll.
+
+The light-dependent reactions happen in the thylakoid membranes: light splits water molecules, releasing oxygen and producing ATP and NADPH. The Calvin cycle, which occurs in the stroma, uses that ATP and NADPH to fix carbon dioxide into glucose.
+
+The overall equation is 6CO2 + 6H2O + light energy → C6H12O6 + 6O2. The rate of photosynthesis is limited by light intensity, carbon dioxide concentration and temperature.`;
+
 export function GeneratorForm({ onResult }: { onResult: (set: GeneratedSet) => void }) {
   const [mode, setMode] = useState<'paste' | 'upload'>('paste');
   const [text, setText] = useState('');
@@ -126,17 +133,31 @@ export function GeneratorForm({ onResult }: { onResult: (set: GeneratedSet) => v
               rows={10}
               value={text}
               onChange={(event) => setText(event.target.value)}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canSubmit) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
               placeholder="Paste lecture notes, a textbook section, or your own summary."
             />
-            <p
-              className={cn(
-                'mt-2 text-xs tabular-nums',
-                overLimit ? 'text-destructive' : nearLimit ? 'text-warning' : 'text-muted-foreground',
-              )}
-            >
-              {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()} characters
-              {overLimit ? ' — trim this down before generating.' : ''}
-            </p>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <p
+                className={cn(
+                  'text-xs tabular-nums',
+                  overLimit ? 'text-destructive' : nearLimit ? 'text-warning' : 'text-muted-foreground',
+                )}
+              >
+                {text.length.toLocaleString()} / {MAX_CHARS.toLocaleString()} characters
+                {overLimit ? ' — trim this down before generating.' : ''}
+              </p>
+              {text.length === 0 ? (
+                <Button variant="ghost" size="sm" onClick={() => setText(SAMPLE_NOTES)}>
+                  <SparklesIcon className="size-3.5" />
+                  Try sample notes
+                </Button>
+              ) : null}
+            </div>
           </div>
         ) : (
           <div>
@@ -240,9 +261,18 @@ export function GeneratorForm({ onResult }: { onResult: (set: GeneratedSet) => v
             {pending ? 'Generating…' : 'Generate'}
           </Button>
           {pending ? (
-            <p className="text-sm text-muted-foreground">
-              Reading your notes and writing questions — this takes a few seconds.
-            </p>
+            <div className="flex items-center gap-4" role="status">
+              <div className="riffle" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Reading your notes and writing {type === 'flashcards' ? 'cards' : 'questions'} — this takes a few seconds.
+              </p>
+            </div>
+          ) : mode === 'paste' ? (
+            <p className="hidden text-xs text-muted-foreground sm:block">or press Ctrl + Enter</p>
           ) : null}
         </div>
       </CardBody>

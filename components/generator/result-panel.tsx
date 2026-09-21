@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/field';
 import { FlashcardReview } from '@/components/flashcards/flashcard-review';
 import { QuizRunner } from '@/components/quiz/quiz-runner';
-import { LayersIcon, ListChecksIcon, UndoIcon } from '@/components/ui/icons';
+import { DownloadIcon, LayersIcon, ListChecksIcon, UndoIcon } from '@/components/ui/icons';
+import { downloadSet } from '@/lib/export';
 import type { GeneratedSet } from '@/lib/types';
 
 export function ResultPanel({
@@ -31,10 +32,21 @@ export function ResultPanel({
           </span>
           {isCards ? `${set.items.length} flashcards` : `${set.items.length} questions`}
         </h2>
-        <Button variant="secondary" size="sm" onClick={onReset}>
-          <UndoIcon />
-          Start over
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => downloadSet(set)}
+            title={isCards ? 'Download as a tab-separated file that Anki can import' : 'Download as a CSV spreadsheet'}
+          >
+            <DownloadIcon />
+            {isCards ? 'Export for Anki' : 'Export CSV'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={onReset}>
+            <UndoIcon />
+            Start over
+          </Button>
+        </div>
       </div>
 
       {set.type === 'flashcards' ? <FlashcardReview items={set.items} /> : <QuizRunner items={set.items} />}

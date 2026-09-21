@@ -8,6 +8,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import {
   ChevronDownIcon,
+  DownloadIcon,
   LayersIcon,
   ListChecksIcon,
   SparklesIcon,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/icons';
 import { FlashcardReview } from '@/components/flashcards/flashcard-review';
 import { QuizRunner } from '@/components/quiz/quiz-runner';
+import { downloadSet } from '@/lib/export';
 import { cn } from '@/lib/utils';
 import type { Flashcard, QuizItem } from '@/lib/ai/schemas';
 import type { StudySetRow } from '@/lib/types';
@@ -90,7 +92,7 @@ export function SetList({ sets }: { sets: StudySetRow[] }) {
                     </div>
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
@@ -100,6 +102,22 @@ export function SetList({ sets }: { sets: StudySetRow[] }) {
                   >
                     {open ? 'Close' : 'Open'}
                     <ChevronDownIcon className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      downloadSet(
+                        row.type === 'flashcards'
+                          ? { type: 'flashcards', items: row.items as Flashcard[] }
+                          : { type: 'quiz', items: row.items as QuizItem[] },
+                        row.title,
+                      )
+                    }
+                    title={isCards ? 'Download for Anki (.txt)' : 'Download as CSV'}
+                  >
+                    <DownloadIcon className="size-3.5" />
+                    Export
                   </Button>
                   <Button
                     size="sm"

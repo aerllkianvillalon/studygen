@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { SignOutButton } from '@/components/sign-out-button';
+import { StreakBadge } from '@/components/streak-badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { buttonVariants } from '@/components/ui/button';
 import { LayersIcon } from '@/components/ui/icons';
@@ -34,6 +35,7 @@ export function SiteHeader({ email }: { email: string | null }) {
         </div>
 
         <div className="flex items-center gap-1.5">
+          <StreakBadge />
           <ThemeToggle />
           {email ? (
             <>
