@@ -1,4 +1,4 @@
--- StudyGen schema. Run in the Supabase SQL editor.
+-- TestForge schema. Run in the Supabase SQL editor.
 
 create table if not exists public.study_sets (
   id uuid primary key default gen_random_uuid(),

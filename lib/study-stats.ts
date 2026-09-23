@@ -11,8 +11,8 @@ import { useSyncExternalStore } from 'react';
 export type DayStats = { cards: number; known: number; questions: number; correct: number };
 export type StudyStats = { days: Record<string, DayStats> };
 
-const KEY = 'studygen:stats:v1';
-const EVENT = 'studygen:stats';
+const KEY = 'testforge:stats:v1';
+const EVENT = 'testforge:stats';
 const KEEP_DAYS = 120;
 const EMPTY: StudyStats = { days: {} };
 const ZERO: DayStats = { cards: 0, known: 0, questions: 0, correct: 0 };

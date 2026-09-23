@@ -42,7 +42,7 @@ describe('exportFileName', () => {
   });
 
   it('falls back to a dated name', () => {
-    expect(exportFileName('quiz', '', now)).toBe('studygen-quiz-2026-09-21.csv');
-    expect(exportFileName('flashcards', '!!!', now)).toBe('studygen-flashcards-2026-09-21.txt');
+    expect(exportFileName('quiz', '', now)).toBe('testforge-quiz-2026-09-21.csv');
+    expect(exportFileName('flashcards', '!!!', now)).toBe('testforge-flashcards-2026-09-21.txt');
   });
 });

@@ -31,9 +31,14 @@ export async function updateSession(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
 
-  if (!user && path.startsWith('/dashboard')) {
+  // /reset-password needs the short-lived session a recovery link creates,
+  // so it is gated the same way as the account pages, not treated as a public
+  // auth page like /login and /register.
+  const requiresSession = path.startsWith('/dashboard') || path.startsWith('/profile') || path.startsWith('/reset-password');
+
+  if (!user && requiresSession) {
     const url = request.nextUrl.clone();
-    url.pathname = '/login';
+    url.pathname = path.startsWith('/reset-password') ? '/forgot-password' : '/login';
     url.searchParams.set('next', path);
     return NextResponse.redirect(url);
   }

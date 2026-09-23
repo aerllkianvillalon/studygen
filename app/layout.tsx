@@ -5,7 +5,7 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'StudyGen — flashcards and quizzes from your notes',
+  title: 'TestForge — forge your notes into practice tests',
   description:
     'Turn pasted notes or a PDF into flashcards or a multiple-choice quiz. No account required.',
 };

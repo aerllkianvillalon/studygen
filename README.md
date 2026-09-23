@@ -1,6 +1,8 @@
-# StudyGen
+# TestForge
 
 Turns pasted notes or an uploaded PDF into flashcards or a multiple-choice quiz. Guests can generate and review without an account; signed-in users can save sets to a dashboard.
+
+Formerly StudyGen — renamed, no functional changes from the rename itself. `study_sets` (the table) and a few internal identifiers keep their old name; see "Rebrand" below for what did and didn't change.
 
 Next.js (App Router) · TypeScript · Tailwind · Supabase (Auth + Postgres with RLS) · Google Gemini · Upstash Redis · Vercel.
 
@@ -9,7 +11,7 @@ Next.js (App Router) · TypeScript · Tailwind · Supabase (Auth + Postgres with
 ```bash
 npm install
 cp .env.example .env.local   # fill in the values
-npm run test                 # 19 tests, no network or API key needed
+npm run test                 # 20 tests, no network or API key needed
 npm run dev
 ```
 
@@ -101,3 +103,31 @@ The UI follows the shadcn/ui approach: semantic tokens, hairline borders, a neut
 - **Landing page.** A live, flippable demo card in the hero (`components/hero-deck.tsx`), a "Try sample notes" button, `Ctrl/⌘ + Enter` to generate, and a card-shuffle animation while generating.
 
 Tests for the streak and export logic are in `lib/study-stats.test.ts` and `lib/export.test.ts` and run with the rest via `npm test`.
+
+## Accounts, without an email step
+
+Signing up creates the account immediately — no "click the link we emailed you" step. `app/api/auth/register` uses the Supabase admin API (`lib/supabase/admin.ts`, service role key) to create the user pre-confirmed, then signs them in server-side in the same request.
+
+That trade-off needs its own guard rail: normally, sending a real email to a real inbox is what throttles account creation for free. Skipping it removes that throttle, so `lib/rate-limit.ts` adds a signup-specific limiter (by IP, since there's no user id yet) tighter than the generation one.
+
+**Only one thing still sends an email: forgot password.** `/forgot-password` calls `supabase.auth.resetPasswordForEmail`, which is Supabase's own flow and the one place a real email goes out. It always shows the same "check your email" message whether or not the address has an account, so the form can't be used to test which emails are registered — a deliberate difference from sign-up, where a duplicate-email error is shown plainly, because colliding with an existing account on *purpose* is normal sign-up UX.
+
+`/reset-password` is where the emailed link lands. It's protected by middleware the same way `/dashboard` and `/profile` are: no session, no access — the difference is that a recovery link is what creates that session, rather than a normal sign-in.
+
+## Profile page
+
+`/profile`, linked from the icon next to Sign out in the header, only when signed in (middleware redirects a guest to `/login?next=/profile`, same pattern as `/dashboard`). It shows the account's email, a change-password form, and account deletion.
+
+Deleting an account is two clicks on purpose: the first only reveals a confirmation panel that requires typing `DELETE`; nothing is deleted until that matches. It calls `app/api/account` (`DELETE`), which uses the admin client to remove the auth user. `study_sets.user_id` references `auth.users on delete cascade`, so every saved set goes with it — the route doesn't need to delete those rows itself.
+
+## Rebrand
+
+StudyGen → TestForge. Renamed: every user-facing string, the logo (`components/logo.tsx`, an anvil with sparks — raw notes forged into a test), the favicon (`app/icon.svg`, `app/apple-icon.png`, `app/favicon.ico`, picked up automatically by Next's file-based metadata convention, no manual `<link>` tags), `package.json`'s name, and internal-but-visible strings like the `localStorage` key (`lib/study-stats.ts`) and the Redis key prefixes (`lib/rate-limit.ts`).
+
+Deliberately **not** renamed: the `study_sets` table and its columns in `supabase/schema.sql`. Renaming a table users' data already lives in means a migration with a real chance of downtime or data loss for a purely cosmetic win; the comment at the top of that file is updated, the identifiers are not.
+
+## Privacy notice
+
+`/privacy`, linked from the footer and from the profile page. It describes what's actually stored — matched against this codebase, not written generically — including that the localStorage-only study stats never reach the server, that only a short excerpt of submitted notes is saved (never the full text), and that the notes sent to Gemini for generation aren't stored by this app beyond that excerpt. It names Supabase, Google Gemini, Upstash and Vercel as the services involved, and links to a Facebook page (`lib/site.ts`'s `CONTACT_URL`) as the contact point. It's plain language, not a legal document — said so on the page itself.
+
+Tests for the redirect-safety and password-error-mapping logic are in `lib/safe-redirect.test.ts` and `lib/password-errors.test.ts`.

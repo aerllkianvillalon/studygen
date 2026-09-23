@@ -1,20 +1,18 @@
 import Link from 'next/link';
+import { Logo } from '@/components/logo';
 import { SignOutButton } from '@/components/sign-out-button';
 import { StreakBadge } from '@/components/streak-badge';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { buttonVariants } from '@/components/ui/button';
-import { LayersIcon } from '@/components/ui/icons';
+import { UserIcon } from '@/components/ui/icons';
 
 export function SiteHeader({ email }: { email: string | null }) {
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-2 px-5">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-              <LayersIcon className="size-4" />
-            </span>
-            <span className="hidden min-[400px]:inline">StudyGen</span>
+          <Link href="/" className="font-semibold">
+            <Logo />
           </Link>
           <nav aria-label="Main" className="hidden items-center gap-1 text-sm sm:flex">
             <Link
@@ -43,6 +41,9 @@ export function SiteHeader({ email }: { email: string | null }) {
                 Saved sets
               </Link>
               <SignOutButton />
+              <Link href="/profile" className={buttonVariants('ghost', 'icon')} aria-label="Profile" title="Profile">
+                <UserIcon />
+              </Link>
             </>
           ) : (
             <>

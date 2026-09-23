@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input, Label, PasswordInput } from '@/components/ui/field';
+import { safeNextPath } from '@/lib/safe-redirect';
+import { MIN_PASSWORD_LENGTH } from '@/lib/site';
 import { createClient } from '@/lib/supabase/client';
-
-const MIN_PASSWORD = 8;
 
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const router = useRouter();
@@ -16,38 +17,44 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkEmail, setCheckEmail] = useState(false);
+
+  function goToNext() {
+    router.push(safeNextPath(params.get('next')));
+    router.refresh();
+  }
 
   async function submit() {
     setError(null);
 
-    if (mode === 'register' && password.length < MIN_PASSWORD) {
-      setError(`Passwords need at least ${MIN_PASSWORD} characters.`);
+    if (mode === 'register' && password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Passwords need at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
 
     setPending(true);
-    const supabase = createClient();
-
     try {
       if (mode === 'register') {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
+        // Account creation happens server-side with the admin API, which marks
+        // the address confirmed on the spot — no confirmation email, no wait.
+        // See app/api/auth/register/route.ts for why.
+        const response = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
         });
-        if (signUpError) {
-          setError(signUpError.message);
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          setError(payload?.error ?? "We couldn't create that account. Try again.");
           return;
         }
-        // With email confirmation on, there is no session yet.
-        if (!data.session) {
-          setCheckEmail(true);
+        if (payload?.accountCreated && !payload?.ok) {
+          // Created but the automatic sign-in failed; send them to log in manually.
+          router.push('/login');
           return;
         }
       } else {
+        const supabase = createClient();
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
         if (signInError) {
           setError(
@@ -59,19 +66,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         }
       }
 
-      router.push(params.get('next') ?? '/dashboard');
-      router.refresh();
+      goToNext();
     } finally {
       setPending(false);
     }
-  }
-
-  if (checkEmail) {
-    return (
-      <Alert tone="success" title="Check your email">
-        We sent a confirmation link to {email}. Open it to finish creating your account.
-      </Alert>
-    );
   }
 
   return (
@@ -88,7 +86,17 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         />
       </div>
       <div>
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="password">Password</Label>
+          {mode === 'login' ? (
+            <Link
+              href="/forgot-password"
+              className="mb-2 text-xs font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              Forgot password?
+            </Link>
+          ) : null}
+        </div>
         <PasswordInput
           id="password"
           autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
@@ -97,7 +105,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           onKeyDown={(event) => event.key === 'Enter' && submit()}
         />
         {mode === 'register' ? (
-          <p className="mt-1.5 text-xs text-muted-foreground">At least {MIN_PASSWORD} characters.</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">At least {MIN_PASSWORD_LENGTH} characters.</p>
         ) : null}
       </div>
 

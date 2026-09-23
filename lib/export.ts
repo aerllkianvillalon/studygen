@@ -47,7 +47,7 @@ export function exportFileName(type: StudySetType, title?: string | null, now: D
     .replace(/^-+|-+$/g, '')
     .slice(0, 50);
   const date = now.toISOString().slice(0, 10);
-  const base = slug || `studygen-${type}-${date}`;
+  const base = slug || `testforge-${type}-${date}`;
   return `${base}.${type === 'flashcards' ? 'txt' : 'csv'}`;
 }
 

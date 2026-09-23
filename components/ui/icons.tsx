@@ -187,3 +187,22 @@ export const SwapIcon = icon(
     <path d="M20 17H4" />
   </>,
 );
+export const UserIcon = icon(
+  <>
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </>,
+);
+export const ExternalLinkIcon = icon(
+  <>
+    <path d="M15 3h6v6" />
+    <path d="M10 14 21 3" />
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+  </>,
+);
+export const ArrowLeftIcon = icon(
+  <>
+    <path d="m12 19-7-7 7-7" />
+    <path d="M19 12H5" />
+  </>,
+);

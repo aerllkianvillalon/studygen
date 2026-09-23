@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'destructive';
 type Size = 'sm' | 'md' | 'lg' | 'icon';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -20,6 +20,8 @@ const variants: Record<Variant, string> = {
     'border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground',
   ghost: 'hover:bg-accent hover:text-accent-foreground',
   danger: 'border border-input bg-background text-destructive shadow-sm hover:bg-destructive/10',
+  // Filled red is reserved for the final, irreversible confirmation.
+  destructive: 'bg-destructive text-destructive-foreground shadow hover:bg-destructive/90',
 };
 
 const sizes: Record<Size, string> = {
