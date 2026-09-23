@@ -1,17 +1,47 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Confetti } from '@/components/ui/confetti';
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, UndoIcon, XIcon } from '@/components/ui/icons';
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+  ShuffleIcon,
+  SwapIcon,
+  UndoIcon,
+  VolumeIcon,
+  XIcon,
+} from '@/components/ui/icons';
 import { recordActivity } from '@/lib/study-stats';
 import { cn } from '@/lib/utils';
 import type { QuizItem } from '@/lib/ai/schemas';
 
+/**
+ * Brought up to the same level of polish as the flashcard review: shuffle the
+ * questions still ahead, shuffle each question's own answer order, read the
+ * current question or verdict aloud, and a distraction-free focus mode. See
+ * components/flashcards/flashcard-review.tsx for the sibling implementation —
+ * the toolbar and focus-mode mechanics intentionally match it.
+ */
+
 const CELEBRATE_AT = 80; // percent
 
+function shuffled<T>(list: T[]): T[] {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export function QuizRunner({ items }: { items: QuizItem[] }) {
+  const [order, setOrder] = useState<number[]>(() => items.map((_, i) => i));
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [score, setScore] = useState(0);
@@ -19,17 +49,120 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
   const [picks, setPicks] = useState<number[]>([]);
   const nextButton = useRef<HTMLButtonElement>(null);
 
-  const question = items[index];
+  // Study options, matching the flashcard toolbar.
+  const [shuffleOptions, setShuffleOptions] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [canSpeak, setCanSpeak] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const utterance = useRef<SpeechSynthesisUtterance | null>(null);
+
+  const question = items[order[index]];
   const finished = index >= items.length;
+  const optionCount = question?.options.length ?? 0;
+
+  // Read through a ref so toggling the checkbox mid-question never reshuffles
+  // the options you're already looking at — only takes effect from the next
+  // question the memo below actually recomputes for.
+  const [optionOrder, setOptionOrder] = useState<number[]>([]);
+
+useEffect(() => {
+  const idx = Array.from({ length: optionCount }, (_, i) => i);
+  setOptionOrder(shuffleOptions ? shuffled(idx) : idx);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [order[index]]);
+
+useEffect(() => {
+  if (selected !== null) return;
+  const idx = Array.from({ length: optionCount }, (_, i) => i);
+  setOptionOrder(shuffleOptions ? shuffled(idx) : idx);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [shuffleOptions]);
 
   // After answering, move focus to the next step so the keyboard flow is
   // answer → Enter → next question, without hunting for the button.
   useEffect(() => {
-    if (selected !== null) nextButton.current?.focus();
+    if (selected !== null && selected === question.correctIndex) nextButton.current?.focus();
   }, [selected]);
 
-  function choose(optionIndex: number) {
+  useEffect(() => {
+    setCanSpeak('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined');
+    return () => {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  // Focus mode: lock page scroll, and let Esc leave. Identical to the
+  // flashcard's version.
+  useEffect(() => {
+    if (!focus) return;
+    const previous = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setFocus(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.documentElement.style.overflow = previous;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [focus]);
+
+  function stopSpeaking() {
+    if (!('speechSynthesis' in window)) return;
+    utterance.current = null; // so the cancelled utterance's onerror is ignored
+    window.speechSynthesis.cancel();
+    setSpeaking(false);
+  }
+
+  /** What "Read aloud" reads: the question and its options before answering, the verdict and explanation after. */
+  function speechText(): string {
+    if (selected === null) {
+      const optionsText = optionOrder
+        .map((optionIndex, i) => `${String.fromCharCode(65 + i)}. ${question.options[optionIndex]}`)
+        .join('. ');
+      return `${question.question} ${optionsText}`;
+    }
+    const verdict = selected === question.correctIndex ? 'Correct.' : 'Not this one.';
+    return `${verdict} ${question.explanation}`;
+  }
+
+  function toggleSpeak() {
+    if (speaking) {
+      stopSpeaking();
+      return;
+    }
+    const spoken = new SpeechSynthesisUtterance(speechText());
+    const finish = () => {
+      if (utterance.current === spoken) {
+        utterance.current = null;
+        setSpeaking(false);
+      }
+    };
+    spoken.onend = finish;
+    spoken.onerror = finish;
+    window.speechSynthesis.cancel();
+    utterance.current = spoken;
+    window.speechSynthesis.speak(spoken);
+    setSpeaking(true);
+  }
+
+  /** Reshuffles only the questions strictly after this one — the current question, answered or not, never changes under you. */
+  function shuffleUpcoming() {
+    const start = selected === null ? index : index + 1;
+    if (items.length - start < 2) return;
+    stopSpeaking();
+    setOrder((prev) => [...prev.slice(0, start), ...shuffled(prev.slice(start))]);
+  }
+
+  function toggleShuffleOptions() {
+    stopSpeaking();
+    setShuffleOptions((s) => !s);
+  }
+
+  function choose(displayIndex: number) {
     if (selected !== null || finished) return;
+    const optionIndex = optionOrder[displayIndex];
+    stopSpeaking();
     setSelected(optionIndex);
     const correct = optionIndex === question.correctIndex;
     if (correct) setScore((s) => s + 1);
@@ -39,11 +172,14 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
 
   function next() {
     if (selected === null) return;
+    stopSpeaking();
     setSelected(null);
     setIndex((i) => i + 1);
   }
 
   function restart() {
+    stopSpeaking();
+    setOrder(items.map((_, i) => i));
     setIndex(0);
     setSelected(null);
     setScore(0);
@@ -53,7 +189,7 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
 
   // Registered once; reads the latest handlers through a ref (no stale closures).
   const actions = useRef({ choose, next, optionCount: 0, answered: false });
-  actions.current = { choose, next, optionCount: question?.options.length ?? 0, answered: selected !== null };
+  actions.current = { choose, next, optionCount, answered: selected !== null };
 
   useEffect(() => {
     if (finished) return;
@@ -65,7 +201,7 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
       const current = actions.current;
 
       if (!current.answered) {
-        // 1–4 or A–D pick an option.
+        // 1–4 or A–D pick an option, by the position it's shown at.
         const digit = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
         const letter = /^[a-z]$/i.test(event.key) ? event.key.toLowerCase().charCodeAt(0) - 97 : -1;
         const picked = digit >= 0 ? digit : letter;
@@ -84,11 +220,40 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [finished]);
 
-  if (finished) {
-    return <Results items={items} score={score} answers={answers} picks={picks} onRestart={restart} />;
+  /**
+   * Normal layout renders `children` in place. Focus mode portals them to
+   * `document.body`, exactly like the flashcard review — see that file's
+   * `shell()` for why a portal beats a plain z-index here.
+   */
+  function shell(children: React.ReactNode) {
+    if (!focus) return children;
+    return createPortal(
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
+        <div className="bg-dots pointer-events-none absolute inset-0" aria-hidden="true" />
+        <div className="relative mx-auto flex min-h-full max-w-2xl flex-col justify-center px-5 py-10">
+          {children}
+        </div>
+      </div>,
+      document.body,
+    );
   }
 
-  return (
+  if (finished) {
+    return shell(
+      <Results
+        items={items}
+        order={order}
+        score={score}
+        answers={answers}
+        picks={picks}
+        onRestart={restart}
+        focus={focus}
+        onExitFocus={() => setFocus(false)}
+      />,
+    );
+  }
+
+  return shell(
     <div className="mx-auto w-full max-w-2xl space-y-5">
       <div className="space-y-2.5">
         <div className="flex items-center justify-between text-sm text-muted-foreground">
@@ -113,12 +278,64 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
         </div>
       </div>
 
+      <div className="-mx-1 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={shuffleUpcoming}
+            disabled={items.length - index - 1 < 2}
+            aria-label="Shuffle the remaining questions"
+          >
+            <ShuffleIcon />
+            <span className="hidden sm:inline">Shuffle</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleShuffleOptions}
+            aria-pressed={shuffleOptions}
+            aria-label="Shuffle answer order"
+            className={cn(shuffleOptions && 'bg-accent')}
+          >
+            <SwapIcon />
+            <span className="hidden sm:inline">Shuffle options</span>
+          </Button>
+        </div>
+        <div className="flex items-center gap-1">
+          {canSpeak ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleSpeak}
+              aria-pressed={speaking}
+              aria-label={speaking ? 'Stop reading aloud' : 'Read this question aloud'}
+              className={cn(speaking && 'bg-accent')}
+            >
+              <VolumeIcon className={cn(speaking && 'animate-pulse')} />
+              <span className="hidden sm:inline">{speaking ? 'Stop' : 'Read aloud'}</span>
+            </Button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setFocus((f) => !f)}
+            aria-pressed={focus}
+            aria-label={focus ? 'Exit focus mode' : 'Enter focus mode'}
+          >
+            {focus ? <MinimizeIcon /> : <MaximizeIcon />}
+            <span className="hidden sm:inline">{focus ? 'Exit focus' : 'Focus'}</span>
+          </Button>
+        </div>
+      </div>
+
       <Card>
         <CardBody className="space-y-6 p-5 sm:p-8">
           <h3 className="text-xl font-medium leading-snug tracking-tight sm:text-2xl">{question.question}</h3>
 
           <div className="space-y-2.5" role="group" aria-label="Answer options">
-            {question.options.map((option, optionIndex) => {
+            {optionOrder.map((optionIndex, displayIndex) => {
+              const option = question.options[optionIndex];
               const isAnswer = optionIndex === question.correctIndex;
               const isPicked = optionIndex === selected;
               const revealed = selected !== null;
@@ -127,7 +344,7 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
                 <button
                   key={optionIndex}
                   type="button"
-                  onClick={() => choose(optionIndex)}
+                  onClick={() => choose(displayIndex)}
                   disabled={revealed}
                   className={cn(
                     'group flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm leading-relaxed transition-colors',
@@ -151,7 +368,7 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
                     ) : revealed && isPicked ? (
                       <XIcon className="size-3.5" />
                     ) : (
-                      String.fromCharCode(65 + optionIndex)
+                      String.fromCharCode(65 + displayIndex)
                     )}
                   </span>
                   <span className="flex-1">{option}</span>
@@ -183,22 +400,28 @@ export function QuizRunner({ items }: { items: QuizItem[] }) {
           Press <Kbd>A</Kbd>–<Kbd>D</Kbd> or <Kbd>1</Kbd>–<Kbd>4</Kbd> to answer
         </p>
       )}
-    </div>
+    </div>,
   );
 }
 
 function Results({
   items,
+  order,
   score,
   answers,
   picks,
   onRestart,
+  focus,
+  onExitFocus,
 }: {
   items: QuizItem[];
+  order: number[];
   score: number;
   answers: boolean[];
   picks: number[];
   onRestart: () => void;
+  focus: boolean;
+  onExitFocus: () => void;
 }) {
   const total = answers.length;
   const percent = total === 0 ? 0 : Math.round((score / total) * 100);
@@ -259,10 +482,17 @@ function Results({
             </p>
           </div>
 
-          <Button variant="secondary" onClick={onRestart}>
-            <UndoIcon />
-            Take it again
-          </Button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="secondary" onClick={onRestart}>
+              <UndoIcon />
+              Take it again
+            </Button>
+            {focus ? (
+              <Button variant="ghost" onClick={onExitFocus}>
+                Exit focus
+              </Button>
+            ) : null}
+          </div>
         </CardBody>
       </Card>
 
@@ -273,7 +503,7 @@ function Results({
           </h4>
           <div className="space-y-2">
             {missed.map((i) => {
-              const item = items[i];
+              const item = items[order[i]];
               return (
                 <details key={i} className="group rounded-lg border bg-card open:shadow-sm">
                   <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-3 text-sm [&::-webkit-details-marker]:hidden">

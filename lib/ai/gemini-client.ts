@@ -1,7 +1,7 @@
 import 'server-only';
 import type { ModelClient, ModelRequest } from './generate-study-set';
 
-const MODEL = process.env.GEMINI_MODEL ?? 'gemini-1.5-flash';
+const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.5-flash';
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const TIMEOUT_MS = 25_000;
 
