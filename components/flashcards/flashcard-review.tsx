@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Confetti } from '@/components/ui/confetti';
@@ -330,17 +331,27 @@ export function FlashcardReview({ items }: { items: Flashcard[] }) {
   }
 
   /**
-   * Normal layout and focus mode share one structure (a wrapper that only turns
-   * `fixed` in focus mode), so toggling focus never remounts the card.
+   * Normal layout renders `children` in place. Focus mode portals them
+   * straight to `document.body` instead of just switching classes in place —
+   * this component can be mounted anywhere (the generator result, or nested
+   * inside a card on the dashboard), and a z-index only wins against the site
+   * header if nothing between here and <body> quietly starts a new stacking
+   * context. A portal sidesteps that entirely: the overlay becomes a sibling
+   * of the header, not a descendant, so it always paints on top of it.
+   * `focus` starts `false` and only ever flips to `true` from a click, so the
+   * server-rendered and first client render always take the `children`
+   * branch — `document` is never touched before it exists.
    */
   function shell(children: React.ReactNode) {
-    return (
-      <div className={cn(focus && 'fixed inset-0 z-50 overflow-y-auto bg-background')}>
-        {focus ? <div className="bg-dots pointer-events-none absolute inset-0" aria-hidden="true" /> : null}
-        <div className={cn(focus && 'relative mx-auto flex min-h-full max-w-2xl flex-col justify-center px-5 py-10')}>
+    if (!focus) return children;
+    return createPortal(
+      <div className="fixed inset-0 z-50 overflow-y-auto bg-background">
+        <div className="bg-dots pointer-events-none absolute inset-0" aria-hidden="true" />
+        <div className="relative mx-auto flex min-h-full max-w-2xl flex-col justify-center px-5 py-10">
           {children}
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
