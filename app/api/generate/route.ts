@@ -8,7 +8,7 @@ import { generateRequestSchema } from '@/lib/validation';
 import type { FailureCode } from '@/lib/ai/generate-study-set';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /** Every failure gets a status that matches what actually went wrong. */
 const STATUS: Record<FailureCode, number> = {
