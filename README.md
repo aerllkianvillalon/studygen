@@ -2,8 +2,6 @@
 
 Turns pasted notes or an uploaded PDF into flashcards or a multiple-choice quiz. Guests can generate and review without an account; signed-in users can save sets to a dashboard.
 
-Formerly StudyGen — renamed, no functional changes from the rename itself. `study_sets` (the table) and a few internal identifiers keep their old name; see "Rebrand" below for what did and didn't change.
-
 Next.js (App Router) · TypeScript · Tailwind · Supabase (Auth + Postgres with RLS) · Google Gemini · Upstash Redis · Vercel.
 
 ## Running it locally
@@ -91,6 +89,8 @@ The UI follows the shadcn/ui approach: semantic tokens, hairline borders, a neut
 
 - **Tokens.** Every colour is a role (`background`, `foreground`, `card`, `primary`, `secondary`, `muted`, `accent`, `destructive`, `success`, `warning`, `border`, `input`, `ring`), defined as HSL components in the `:root` (light) and `.dark` blocks of `app/globals.css` and mapped to Tailwind in `tailwind.config.ts`. Components never use raw colours, so re-theming means editing those two blocks and nothing else.
 - **Theme.** `app/layout.tsx` runs a tiny inline script before first paint that follows the system setting until the person picks a theme, then remembers the choice in `localStorage`. `components/theme-toggle.tsx` is the switch.
+- **Branding.** The logo (`components/logo.tsx`) is an anvil with sparks — raw notes forged into a test. `app/icon.svg`, `app/apple-icon.png` and `app/favicon.ico` are picked up automatically by Next's file-based metadata convention, so there are no manual `<link>` tags to maintain. `app/opengraph-image.tsx` renders the social-preview card at request time from the same palette, and `app/layout.tsx` sets `metadataBase` plus Open Graph/Twitter metadata so links shared elsewhere carry a real preview instead of a bare URL.
+- **Discoverability.** `app/robots.ts` and `app/sitemap.ts` are generated routes rather than static files in `public/`, so they stay in sync with `NEXT_PUBLIC_SITE_URL` automatically; `robots.ts` keeps `/dashboard`, `/profile`, `/reset-password` and `/api` out of the index. `app/not-found.tsx` gives a branded 404 instead of Next's default.
 - **Primitives.** `components/ui/` holds `Button` (plus `buttonVariants` for link-styled buttons), `Card`, `Input`/`Textarea`/`Select`, `Alert`, `Badge`, `Segmented`, and a small inline icon set (`icons.tsx`) so there is no icon dependency.
 - **Flashcards.** `components/flashcards/flashcard-review.tsx` plus the `flashcard:start`/`flashcard:end` block in `app/globals.css`. The card is plain CSS on purpose (no `@apply`), so the 3D flip and the keyframes behave the same regardless of Tailwind's class scanning. Click or press Space to flip; drag the card, or press the left and right arrow keys, to sort it. `prefers-reduced-motion` turns every animation off and sorts instantly.
 
@@ -98,7 +98,7 @@ The UI follows the shadcn/ui approach: semantic tokens, hairline borders, a neut
 
 - **Card extras.** Hover tilt with a light glare (mouse only), *Shuffle* (reorders what's left, never cards already sorted), *Answer first* (swaps the two faces), *Read aloud* (the browser's speech synthesis; the button only appears where it's supported), and *Focus* mode (full-screen, Esc to leave). A finished round lists the cards still to review, and a clean round gets confetti.
 - **Quiz extras.** Answer with `A`–`D` or `1`–`4`, `→` for next. The results screen lists missed questions with what you chose, the correct answer and the explanation. A score of 80% or more gets confetti.
-- **Study streak and activity.** `lib/study-stats.ts` records finished rounds and quizzes per day. The header shows the current streak; the dashboard shows the last seven days. **This is stored in the browser's `localStorage`, not in Supabase**, so it needs no schema change and works for guests, but it doesn't follow someone to another device or survive clearing site data. Moving it server-side would mean a `study_activity` table with RLS, written from the same `recordActivity` call.
+- **Study streak and activity.** `lib/study-stats.ts` records finished rounds and quizzes per day; the dashboard's Study activity card (`components/dashboard/study-activity.tsx`) shows the current streak alongside the last seven days. **This is stored in the browser's `localStorage`, not in Supabase**, so it needs no schema change and works for guests, but it doesn't follow someone to another device or survive clearing site data. Moving it server-side would mean a `study_activity` table with RLS, written from the same `recordActivity` call.
 - **Export.** `lib/export.ts`. Flashcards download as tab-separated text for Anki's File > Import; quizzes as CSV. Spreadsheet cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe, because the text comes from a language model and shouldn't be able to run as a formula.
 - **Landing page.** A live, flippable demo card in the hero (`components/hero-deck.tsx`), a "Try sample notes" button, `Ctrl/⌘ + Enter` to generate, and a card-shuffle animation while generating.
 
@@ -119,12 +119,6 @@ That trade-off needs its own guard rail: normally, sending a real email to a rea
 `/profile`, linked from the icon next to Sign out in the header, only when signed in (middleware redirects a guest to `/login?next=/profile`, same pattern as `/dashboard`). It shows the account's email, a change-password form, and account deletion.
 
 Deleting an account is two clicks on purpose: the first only reveals a confirmation panel that requires typing `DELETE`; nothing is deleted until that matches. It calls `app/api/account` (`DELETE`), which uses the admin client to remove the auth user. `study_sets.user_id` references `auth.users on delete cascade`, so every saved set goes with it — the route doesn't need to delete those rows itself.
-
-## Rebrand
-
-StudyGen → TestForge. Renamed: every user-facing string, the logo (`components/logo.tsx`, an anvil with sparks — raw notes forged into a test), the favicon (`app/icon.svg`, `app/apple-icon.png`, `app/favicon.ico`, picked up automatically by Next's file-based metadata convention, no manual `<link>` tags), `package.json`'s name, and internal-but-visible strings like the `localStorage` key (`lib/study-stats.ts`) and the Redis key prefixes (`lib/rate-limit.ts`).
-
-Deliberately **not** renamed: the `study_sets` table and its columns in `supabase/schema.sql`. Renaming a table users' data already lives in means a migration with a real chance of downtime or data loss for a purely cosmetic win; the comment at the top of that file is updated, the identifiers are not.
 
 ## Privacy notice
 
