@@ -4,10 +4,17 @@ import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+const title = 'TestForge — forge your notes into practice tests';
+const description =
+  'Turn pasted notes or a PDF into flashcards or a multiple-choice quiz. No account required.';
+
 export const metadata: Metadata = {
-  title: 'TestForge — forge your notes into practice tests',
-  description:
-    'Turn pasted notes or a PDF into flashcards or a multiple-choice quiz. No account required.',
+  metadataBase: new URL(SITE_URL),
+  title: { default: title, template: '%s · TestForge' },
+  description,
+  openGraph: { title, description, siteName: 'TestForge', type: 'website' },
+  twitter: { card: 'summary_large_image', title, description },
 };
 
 export const viewport: Viewport = {
